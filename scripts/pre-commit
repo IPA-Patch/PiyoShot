@@ -1,0 +1,44 @@
+#!/usr/bin/env sh
+# IPA-Patch / KiouEditor pre-commit hook.
+#
+# Runs the recipe<->dump cross-check before any commit that touches a
+# recipe (recipes/<name>.py) or the recipe-driving tools (shared/tools/).
+# The dump index is NOT in the repository (see [[analysis-artifact-layers]]:
+# raw binaries / machine-generated dumps / curated specs — only the last
+# one is git-tracked), so this check can only run on a workstation that
+# has the operator's local copy of assets/dump.cs.index.json.
+#
+# Without the dump index this hook is a no-op (prints a heads-up and
+# exits 0): a committer who never edits recipes shouldn't be required
+# to keep a 17 MB il2cpp dump around. The CI does not run this check
+# for the same reason; the build job is the server-side gate that
+# catches recipes whose CAVE_REGION / prologue is wrong (it fails the
+# patch_macho step instead of the verify step).
+#
+# Install with:
+#     make hooks
+# which is a one-liner around `git config core.hooksPath scripts`.
+
+set -e
+
+if ! git diff --cached --name-only \
+  | grep -qE '^(recipes/[^/]+\.py|shared/tools/)' ; then
+    # No recipe / tooling churn in this commit; nothing to verify.
+    exit 0
+fi
+
+INDEX=assets/dump.cs.index.json
+if [ ! -f "$INDEX" ]; then
+    echo "pre-commit: $INDEX not present, skipping recipe<->dump verify."
+    echo "  (drop assets/dump.cs.index.json in place to enable this gate)"
+    exit 0
+fi
+
+# Recipe module driving the verify run. Override via env if you maintain
+# more than one recipe in this repo.
+RECIPE="${VERIFY_SITES_RECIPE:-recipes.kioueditor}"
+
+echo "pre-commit: cross-checking $RECIPE against $INDEX ..."
+PYTHONPATH=shared:. python3 -m tools.verify_sites \
+    --recipe "$RECIPE" \
+    --index  "$INDEX"

@@ -1,0 +1,9 @@
+Package: work.tkgstrator.piyoshot
+Name: PiyoShot
+Version: 0.1.0
+Architecture: iphoneos-arm64
+Description: PiyoShogi capture tweak. Reads a SFEN + hash JSONL, drives the in-app parseSFEN via a Dobby-hooked trampoline, redraws ShogiBoardView, and snapshots the board / key window into <sandbox>/Documents/piyo_captures/<hash>_{board,screen}.png. Runs entirely client-side: never touches the network, never mutates account state. For authorized research use only.
+Maintainer: NEVER KNOWS BEST
+Author: tkgstrator
+Section: Tweaks
+Depends: mobilesubstrate

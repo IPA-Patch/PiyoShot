@@ -1,0 +1,220 @@
+name: deployment
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag to build (e.g. v0.2.0). Empty = use ref name."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+env:
+  THEOS: ${{ github.workspace }}/theos
+  IOS_SDK_VERSION: "16.5"
+  LDID_VERSION: "v2.1.5-procursus7"
+
+concurrency:
+  # Don't kill a release mid-upload; release tags are unique anyway.
+  group: deployment-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            echo "value=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout source at tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.value }}
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install host build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              build-essential curl git make perl xz-utils \
+              libplist-utils libc++-dev \
+              libtinfo6 libncurses6 \
+              python3 python3-pip
+
+      - name: Install ldid
+        run: |
+          curl -L -o /tmp/ldid \
+              "https://github.com/ProcursusTeam/ldid/releases/download/${LDID_VERSION}/ldid_linux_x86_64"
+          sudo install -m 0755 /tmp/ldid /usr/local/bin/ldid
+          ldid -V || ldid 2>&1 | head -1 || true
+
+      - name: Cache Theos
+        id: cache-theos
+        uses: actions/cache@v4
+        with:
+          path: theos
+          key: theos-linux-${{ env.IOS_SDK_VERSION }}-v1
+
+      - name: Install Theos
+        if: steps.cache-theos.outputs.cache-hit != 'true'
+        run: |
+          git clone --recursive https://github.com/theos/theos.git "$THEOS"
+
+          ARCH=$(uname -m)
+          curl -fsSL \
+              "https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-${ARCH}.tar.xz" \
+            | tar xJ -C "$THEOS/toolchain"
+
+          mkdir -p "$THEOS/sdks"
+          curl -L -o /tmp/sdk.tar.gz \
+              "https://github.com/theos/sdks/archive/master.tar.gz"
+          tar -xf /tmp/sdk.tar.gz -C /tmp
+          cp -R "/tmp/sdks-master/iPhoneOS${IOS_SDK_VERSION}.sdk" \
+                "$THEOS/sdks/"
+
+      - name: Verify Theos
+        run: |
+          test -d "$THEOS/sdks/iPhoneOS${IOS_SDK_VERSION}.sdk"
+          test -x "$THEOS/toolchain/linux/iphone/bin/clang"
+          "$THEOS/toolchain/linux/iphone/bin/clang" --version
+
+      # Recipe<->dump cross-check (verify_sites) is NOT run here. It
+      # needs assets/dump.cs.index.json, which is .gitignored under the
+      # project's analysis-artifact layering (raw binaries and machine-
+      # generated dumps are not committed; only curated specs are). The
+      # check runs locally as a pre-commit hook (scripts/pre-commit,
+      # installed via `make hooks`) against the operator's own dump
+      # index. The release builds below only catch build-time errors;
+      # recipe-level mistakes (stale CAVE_REGION, prologue drift) are
+      # caught by `tools.patch_macho` when the operator runs `make ipa`
+      # against their own decrypted IPA.
+
+      # FINALPACKAGE=1 — Theos release-mode switch. Without it Theos
+      # builds at -O0 with debug symbols and stamps "+debug" into the
+      # .deb file name (e.g. *_0.2.0-1+debug_iphoneos-arm64.deb), which
+      # is fine locally but not what a tagged Release should ship. Each
+      # of the three make invocations below passes it so every CD
+      # artifact is built in release shape: -O3, stripped debug
+      # symbols, no "+debug" suffix on the .deb.
+      - name: Build rootless .deb (MobileSubstrate)
+        run: |
+          make clean
+          make package FINALPACKAGE=1
+          ls -la packages/
+
+      - name: Build jailed .dylib (Dobby static)
+        run: |
+          make jailed FINALPACKAGE=1
+          ls -la packages/jailed/
+
+      - name: Build binpatch .dylib (iOS 18, __DATA slot table)
+        # The binpatch flavor is what users pair with `make ipa` on
+        # their own host against a decrypted PiyoShogi IPA. Same
+        # Dobby-static link shape as the jailed dylib, but compiled with
+        # -DIPA_BINPATCH=1 so the constructor publishes hook function
+        # pointers into a reserved __DATA slot instead of inline-hooking
+        # __TEXT — the only mode that survives iOS 18's CSM.
+        run: |
+          make binpatch FINALPACKAGE=1
+          ls -la packages/binpatch/
+
+      - name: Sanity-check dylibs (no external hook engine)
+        # Both Dobby-static dylibs must NOT link to libsubstrate or
+        # libdobby — those references would brick TrollStore / patched
+        # IPA installs at load time.
+        run: |
+          for DYLIB in packages/jailed/PiyoShot.dylib \
+                       packages/binpatch/PiyoShot.dylib; do
+              test -f "$DYLIB"
+              if command -v otool >/dev/null 2>&1; then
+                  otool -L "$DYLIB"
+                  if otool -L "$DYLIB" | grep -E "libsubstrate|libdobby"; then
+                      echo "::error::$DYLIB leaks an external hook-engine dependency"
+                      exit 1
+                  fi
+              else
+                  strings "$DYLIB" | grep -E "libsubstrate|libdobby\.dylib" \
+                      && { echo "::error::$DYLIB leaks an external hook-engine dependency"; exit 1; } \
+                      || echo "$DYLIB: no external hook-engine references found"
+              fi
+          done
+
+      - name: Stage release assets
+        id: assets
+        # We ship the .deb, the jailed dylib, and the binpatch dylib —
+        # but never the patched IPA itself, since that would re-bundle
+        # the decrypted PiyoShogi executable the operator supplied.
+        # Users wanting the patched IPA pair the binpatch dylib with
+        # `make ipa DECRYPTED_IPA=...` on their own host.
+        #
+        # Dylib names mirror the Theos .deb name shape:
+        #   work.tkgstrator.piyoshot_<ver>-1_iphoneos-arm64-<flavor>.dylib
+        # so all three artifacts ship under the same bundle-id /
+        # version / arch prefix and only differ in the trailing flavor
+        # tag (jailed / binpatch). Grep-friendly and unambiguous.
+        run: |
+          mkdir -p dist
+          # Versioned .deb file name copied verbatim out of packages/.
+          cp packages/*.deb dist/
+          # Derive the dylib filename stem from the .deb itself, not
+          # from ./control. This way the dylibs track whatever shape
+          # Theos chose (including the package revision, any future
+          # rename, FINALPACKAGE / DEBUG toggle): we just strip the
+          # trailing ".deb" and append the flavor tag.
+          DEB=$(basename packages/*.deb .deb)
+          cp packages/jailed/PiyoShot.dylib \
+             "dist/${DEB}-jailed.dylib"
+          cp packages/binpatch/PiyoShot.dylib \
+             "dist/${DEB}-binpatch.dylib"
+          ls -la dist/
+
+      - name: Compute SHA256 checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        run: |
+          TAG="${{ steps.tag.outputs.value }}"
+          VER="${TAG#v}"
+          # Pull the section between `## [<ver>]` and the next `## [`.
+          # Falls back to a one-liner if no CHANGELOG entry exists yet.
+          awk -v ver="$VER" '
+            $0 ~ "^## \\[" ver "\\]" { in_section = 1; print; next }
+            in_section && /^## \[/ { exit }
+            in_section { print }
+          ' CHANGELOG.md > release_notes.md
+          if [ ! -s release_notes.md ]; then
+            echo "(no CHANGELOG section for ${TAG}; see CHANGELOG.md for context)" \
+              > release_notes.md
+          fi
+          echo "----- release_notes.md -----"
+          cat release_notes.md
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.value }}
+          name: ${{ steps.tag.outputs.value }}
+          body_path: release_notes.md
+          files: |
+            dist/*.deb
+            dist/*.dylib
+            dist/SHA256SUMS
+          fail_on_unmatched_files: true
+          prerelease: ${{ contains(steps.tag.outputs.value, '-') }}
