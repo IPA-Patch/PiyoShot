@@ -131,3 +131,12 @@ void *PSCurrentPosition(void);
 // pulsating / fade animations that flatten the batch runner's per-
 // record wall clock). Flavor-agnostic — no binpatch slot required.
 void PSInstallAdHideHook(void);
+
+// Runtime ObjC swizzle that NoOps -[AVAudioPlayer play] so PiyoShogi's
+// piece-move / paste-success SE never spins up an AudioQueue during a
+// batch. At the runner's ~143 ms/record cadence the audio subsystem's
+// per-process AudioQueue ceiling is otherwise hit at ~4841 iterations,
+// which surfaces as an unhandled NSException inside
+// -[UINib instantiateWithOwner:options:] when the next nib load
+// touches the poisoned audio session. Flavor-agnostic.
+void PSInstallSoundKillHook(void);

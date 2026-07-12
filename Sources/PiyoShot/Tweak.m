@@ -137,6 +137,13 @@ __attribute__((constructor)) static void init(void) {
     // batch runner.
     PSInstallAdHideHook();
 
+    // Sound-kill swizzle — NoOps -[AVAudioPlayer play] so PiyoShogi's
+    // per-paste SE never spins up an AudioQueue. At the batch runner's
+    // ~143 ms/record cadence the per-process AudioQueue ceiling was
+    // otherwise being hit around iteration 4841, which surfaces as an
+    // unhandled NSException inside -[UINib instantiateWithOwner:options:].
+    PSInstallSoundKillHook();
+
     // P2: transparent UIWindow + corner-swipe recogniser. The installer
     // arms UIApplicationDidFinishLaunching / DidBecomeActive observers
     // and builds the window as soon as UIKit is alive.

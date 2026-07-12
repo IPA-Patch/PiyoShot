@@ -108,7 +108,7 @@ $(TWEAK_NAME)_CFLAGS     := -fobjc-arc -Wno-unused-function \
                             -D$(BUILD_COMMIT_DEFINE)=\"$(BUILD_COMMIT)\" \
                             -DPIYOSHOT_VERSION=\"$(PACKAGE_VERSION)\" \
                             -ISources/Chinlan -I$(TWEAK_SOURCES_DIR)
-$(TWEAK_NAME)_FRAMEWORKS := Foundation UIKit UniformTypeIdentifiers
+$(TWEAK_NAME)_FRAMEWORKS := Foundation UIKit UniformTypeIdentifiers AVFoundation
 
 # ---------------------------------------------------------------------------
 # Hook engine / distribution selection.
