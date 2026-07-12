@@ -21,6 +21,14 @@ rules:
       - format
       - chore
       - test
+  # This repo is an ObjC/C tweak — subjects routinely reference
+  # PascalCased class names, `-[AVAudioPlayer play]`-style selectors,
+  # `NSException` / `UINib`, etc. The config-conventional default
+  # forbids sentence-case / start-case / pascal-case / upper-case in
+  # the subject, which rejects those subjects. Disable the rule
+  # (level 0) so symbol-heavy subjects pass linting.
+  subject-case:
+    - 0
 prompt:
   messages:
     skip: "'Enterでスキップ'"
