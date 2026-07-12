@@ -1,0 +1,13 @@
+# Default flags for `act` (https://github.com/nektos/act).
+#
+# - `-P ubuntu-latest=...` swaps act's tiny default image for catthehacker's
+#   `act-latest`, which carries the apt packages most GH-hosted runners
+#   ship with (curl, git, build-essential, etc.) so our deployment.yaml's
+#   "Install host build tools" step doesn't have to fight a barebones
+#   image.
+# - `--container-architecture linux/amd64` is the right default even on
+#   ARM hosts (theos toolchain + L1ghtmann iOSToolchain only publish
+#   x86_64 binaries; running them via Rosetta/qemu beats not running them
+#   at all).
+-P ubuntu-latest=catthehacker/ubuntu:act-latest
+--container-architecture linux/amd64
