@@ -2,7 +2,7 @@ name: integration
 
 # CI: cross-check the recipe sites against the dump, then build all three
 # distribution flavors — the rootless .deb (MobileSubstrate path), the
-# jailed .dylib (Dobby-static path), and the binpatch .dylib (iOS 18
+# jailed .dylib (Dobby-static path), and the chinlan .dylib (iOS 18
 # __DATA slot-table path) — on every push/PR to the protected branches.
 # Fails fast if either dylib accidentally picks up an external hook-engine
 # dependency, since that would brick Sideloadly/TrollStore installs.
@@ -90,10 +90,10 @@ jobs:
             make_target: jailed
             artifact_name: piyoshot-jailed-dylib
             artifact_path: packages/jailed/PiyoShot.dylib
-          - flavor: binpatch
-            make_target: binpatch
-            artifact_name: piyoshot-binpatch-dylib
-            artifact_path: packages/binpatch/PiyoShot.dylib
+          - flavor: chinlan
+            make_target: chinlan
+            artifact_name: piyoshot-chinlan-dylib
+            artifact_path: packages/chinlan/PiyoShot.dylib
 
     steps:
       - name: Checkout source
@@ -152,12 +152,12 @@ jobs:
           make clean
           make ${{ matrix.make_target }}
           ls -la packages/ || true
-          ls -la packages/jailed/ packages/binpatch/ 2>/dev/null || true
+          ls -la packages/jailed/ packages/chinlan/ 2>/dev/null || true
 
       - name: Sanity-check dylib (no external hook engine)
         if: matrix.flavor != 'substrate'
         run: |
-          # The jailed and binpatch builds statically link Dobby; neither
+          # The jailed and chinlan builds statically link Dobby; neither
           # may carry an external libsubstrate/libdobby dependency or it
           # would fail to load on a sideloaded install.
           DYLIB="${{ matrix.artifact_path }}"

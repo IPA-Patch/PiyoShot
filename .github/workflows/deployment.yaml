@@ -120,16 +120,16 @@ jobs:
           make jailed FINALPACKAGE=1
           ls -la packages/jailed/
 
-      - name: Build binpatch .dylib (iOS 18, __DATA slot table)
-        # The binpatch flavor is what users pair with `make ipa` on
+      - name: Build chinlan .dylib (iOS 18, __DATA slot table)
+        # The chinlan flavor is what users pair with `make ipa` on
         # their own host against a decrypted PiyoShogi IPA. Same
         # Dobby-static link shape as the jailed dylib, but compiled with
-        # -DIPA_BINPATCH=1 so the constructor publishes hook function
+        # -DIPA_CHINLAN=1 so the constructor publishes hook function
         # pointers into a reserved __DATA slot instead of inline-hooking
         # __TEXT — the only mode that survives iOS 18's CSM.
         run: |
-          make binpatch FINALPACKAGE=1
-          ls -la packages/binpatch/
+          make chinlan FINALPACKAGE=1
+          ls -la packages/chinlan/
 
       - name: Sanity-check dylibs (no external hook engine)
         # Both Dobby-static dylibs must NOT link to libsubstrate or
@@ -137,7 +137,7 @@ jobs:
         # IPA installs at load time.
         run: |
           for DYLIB in packages/jailed/PiyoShot.dylib \
-                       packages/binpatch/PiyoShot.dylib; do
+                       packages/chinlan/PiyoShot.dylib; do
               test -f "$DYLIB"
               if command -v otool >/dev/null 2>&1; then
                   otool -L "$DYLIB"
@@ -154,17 +154,17 @@ jobs:
 
       - name: Stage release assets
         id: assets
-        # We ship the .deb, the jailed dylib, and the binpatch dylib —
+        # We ship the .deb, the jailed dylib, and the chinlan dylib —
         # but never the patched IPA itself, since that would re-bundle
         # the decrypted PiyoShogi executable the operator supplied.
-        # Users wanting the patched IPA pair the binpatch dylib with
+        # Users wanting the patched IPA pair the chinlan dylib with
         # `make ipa DECRYPTED_IPA=...` on their own host.
         #
         # Dylib names mirror the Theos .deb name shape:
         #   work.tkgstrator.piyoshot_<ver>-1_iphoneos-arm64-<flavor>.dylib
         # so all three artifacts ship under the same bundle-id /
         # version / arch prefix and only differ in the trailing flavor
-        # tag (jailed / binpatch). Grep-friendly and unambiguous.
+        # tag (jailed / chinlan). Grep-friendly and unambiguous.
         run: |
           mkdir -p dist
           # Versioned .deb file name copied verbatim out of packages/.
@@ -177,8 +177,8 @@ jobs:
           DEB=$(basename packages/*.deb .deb)
           cp packages/jailed/PiyoShot.dylib \
              "dist/${DEB}-jailed.dylib"
-          cp packages/binpatch/PiyoShot.dylib \
-             "dist/${DEB}-binpatch.dylib"
+          cp packages/chinlan/PiyoShot.dylib \
+             "dist/${DEB}-chinlan.dylib"
           ls -la dist/
 
       - name: Compute SHA256 checksums
