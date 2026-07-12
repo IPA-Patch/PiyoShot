@@ -144,6 +144,15 @@ __attribute__((constructor)) static void init(void) {
     // unhandled NSException inside -[UINib instantiateWithOwner:options:].
     PSInstallSoundKillHook();
 
+    // Exception-raise logger — swizzles -[NSException raise] to log the
+    // exception's name + reason + userInfo BEFORE it enters the C++
+    // terminate path. PSUncaughtExceptionHandler (installed elsewhere)
+    // never fires for the 4841 crash because Firebase Crashlytics'
+    // FIRCLSTerminateHandler intercepts at std::terminate — this hook
+    // captures the raise reason one level earlier so we can see what
+    // UIKit was trying to say when it aborted.
+    PSInstallExceptionLogHook();
+
     // P2: transparent UIWindow + corner-swipe recogniser. The installer
     // arms UIApplicationDidFinishLaunching / DidBecomeActive observers
     // and builds the window as soon as UIKit is alive.

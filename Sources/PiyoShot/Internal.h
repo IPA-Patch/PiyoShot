@@ -140,3 +140,13 @@ void PSInstallAdHideHook(void);
 // -[UINib instantiateWithOwner:options:] when the next nib load
 // touches the poisoned audio session. Flavor-agnostic.
 void PSInstallSoundKillHook(void);
+
+// Runtime ObjC swizzle for -[NSException raise] that logs each
+// exception's name / reason / userInfo to piyoshot.log BEFORE chaining
+// to the original raise. Diagnostic-only: control flow is preserved,
+// upstream @catch handlers still fire, Firebase Crashlytics still
+// reports. Complements PSUncaughtExceptionHandler (Tweak.m) for cases
+// where the exception is intercepted in the C++ terminate path
+// (FIRCLSTerminateHandler) and NSSetUncaughtExceptionHandler never
+// gets a chance to run. Flavor-agnostic.
+void PSInstallExceptionLogHook(void);
